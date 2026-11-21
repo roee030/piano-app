@@ -6,21 +6,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { Plugin } from 'vite';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-
-const MODEL = 'claude-opus-5-5';
-
-const SYSTEM_PROMPT = `You are the AI tutor inside a piano-learning web app. The student plays a physical MIDI keyboard while the app shows real sheet music on a grand staff. The app itself decides deterministically, in real time, whether each note was right. You do not grade notes. You teach.
-
-What you do:
-- Explain music theory clearly: clefs, ledger lines, key signatures, intervals, scales, chords and inversions, rhythm and counting, time signatures, dynamics.
-- Teach note-reading strategies, such as landmark notes (middle C, treble G, bass F), interval reading, and line versus space patterns.
-- Diagnose patterns in the student's mistake data when it is provided (for example, wrong octave errors around ledger lines, or the left hand weaker than the right) and recommend focused exercises.
-- Build personal practice plans with concrete daily sessions: which hand, which note range, mode (Wait, Chord or Rhythm), BPM, and minutes.
-- Answer general questions about learning piano: posture, fingering, practice habits, motivation.
-
-The app's features you can recommend: an exercise generator (left- and right-hand note ranges, key signature, scale, time signature, number of measures, notes per measure, durations, single notes, mixed or chords, difficulty 1–5), practice modes (Wait: the score waits for the right notes; Chord: the notes of each chord must be struck together; Rhythm: metronome and timing scoring at an adjustable BPM), loop selected measures, repeat mistakes, and practice of each hand alone or both together. When you recommend an exercise, name the concrete settings.
-
-Style: warm, encouraging and precise. Use scientific pitch names (C4 is middle C). Keep answers focused. Use short paragraphs or brief lists, and avoid long essays unless the student asks for depth. Never claim to have heard the student play. Base any statement about their playing only on the practice data provided.`;
+import { MODEL, streamTutor, tutorErrorMessage, type ChatMessage } from '../src/tutor/claude';
 
 const MAX_BODY = 200_000;
 
@@ -104,7 +90,7 @@ function checkRequest(req: IncomingMessage) {
 }
 
 interface TutorRequest {
-  messages: { role: 'user' | 'assistant'; content: string }[];
+  messages: ChatMessage[];
   context?: string;
 }
 
@@ -137,41 +123,13 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
   res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
   const send = (obj: unknown) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
 
-  const messages = body.messages
-    .slice(-30)
-    .filter((m) => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.trim())
-    .map((m) => ({ role: m.role, content: m.content.slice(0, 8000) }));
-
-  const system: Anthropic.Beta.Messages.BetaTextBlockParam[] = [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }];
-  if (body.context) system.push({ type: 'text', text: `Student practice data (from the app's deterministic tracking):\n${body.context.slice(0, 12000)}` });
-
+  const abort = new AbortController();
+  req.on('close', () => abort.abort());
   try {
-    const client = new Anthropic();
-    const stream = client.beta.messages.stream({
-      model: MODEL,
-      max_tokens: 16000,
-      thinking: { type: 'adaptive' },
-      output_config: { effort: 'medium' },
-      betas: ['server-side-fallback-2026-07-01'],
-      fallbacks: 'default',
-      system,
-      messages,
-    });
-    req.on('close', () => stream.abort());
-    for await (const event of stream) {
-      if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') send({ text: event.delta.text });
-    }
-    const final = await stream.finalMessage();
-    if (final.stop_reason === 'refusal') send({ error: 'The tutor could not answer this request. Try rephrasing it.' });
-    else if (final.stop_reason === 'max_tokens') send({ text: '\n\n…(answer truncated)' });
+    await streamTutor(new Anthropic(), body.messages, body.context, { onText: (text) => send({ text }), onError: (error) => send({ error }) }, abort.signal);
     send({ done: true });
   } catch (err) {
-    let msg = String(err);
-    if (err instanceof Anthropic.AuthenticationError || /authentication method/i.test(msg)) msg = 'The AI tutor is not configured: set ANTHROPIC_API_KEY (or run `ant auth login`) and restart the dev server.';
-    else if (err instanceof Anthropic.RateLimitError) msg = 'The tutor is rate limited. Wait a moment and try again.';
-    else if (err instanceof Anthropic.APIConnectionError) msg = 'Could not reach the Anthropic API. Check your internet connection.';
-    else if (err instanceof Anthropic.APIError) msg = `Tutor error (${err.status}): ${err.message}`;
-    send({ error: msg });
+    send({ error: tutorErrorMessage(err, Anthropic, 'The AI tutor is not configured: set ANTHROPIC_API_KEY (or run `ant auth login`) and restart the dev server.') });
   }
   res.end();
 }

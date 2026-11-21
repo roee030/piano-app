@@ -4,8 +4,11 @@ import { useStore } from '../hooks';
 import { keyName } from '../../core/music/keys';
 import { midiToName } from '../../core/music/pitch';
 import { LESSONS } from '../../tutor/lessons';
+import { forgetBrowserKey, getBrowserKey, isKeyRemembered, looksLikeKey, setBrowserKey } from '../../tutor/browserKey';
+import type { ChatMessage } from '../../tutor/claude';
 
-// Set for the GitHub Pages build, which has no server for the tutor endpoint.
+// Set for the GitHub Pages build, which has no server for the tutor endpoint;
+// there the tutor calls the Anthropic API directly with the student's own key.
 const STATIC_SITE = import.meta.env.VITE_STATIC_SITE === '1';
 
 interface Msg {
@@ -42,6 +45,47 @@ function buildContext(): string {
   return lines.join('\n');
 }
 
+/** Streams a reply straight from the browser with the student's own key. */
+async function streamFromBrowser(apiKey: string, history: ChatMessage[], context: string | undefined, onText: (t: string) => void, onError: (m: string) => void) {
+  const [{ default: Anthropic }, { streamTutor, tutorErrorMessage }] = await Promise.all([import('@anthropic-ai/sdk'), import('../../tutor/claude')]);
+  try {
+    const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
+    await streamTutor(client, history, context, { onText, onError });
+  } catch (err) {
+    onError(tutorErrorMessage(err, Anthropic, 'Anthropic rejected this API key. Check it, or forget it and enter a new one.'));
+  }
+}
+
+function KeyPanel({ browserKey, onChange }: { browserKey: string | null; onChange: (k: string | null) => void }) {
+  const [draft, setDraft] = useState('');
+  const [remember, setRemember] = useState(false);
+  if (browserKey) {
+    return (
+      <div className="card card-pad grid" style={{ gap: 8 }}>
+        <h2>Your API key</h2>
+        <div className="muted" style={{ fontSize: 12 }}>
+          Using your key ending in <span className="mono">…{browserKey.slice(-4)}</span>, {isKeyRemembered() ? 'remembered on this device' : 'kept until you close this tab'}. Requests go from your browser straight to api.anthropic.com and are billed to your Anthropic account.
+        </div>
+        <button className="btn" onClick={() => { forgetBrowserKey(); onChange(null); }}>Forget key</button>
+      </div>
+    );
+  }
+  const valid = looksLikeKey(draft);
+  const save = () => { if (!valid) return; setBrowserKey(draft, remember); setDraft(''); onChange(getBrowserKey()); };
+  return (
+    <div className="card card-pad grid" style={{ gap: 8 }}>
+      <h2>Use your own API key</h2>
+      <div className="muted" style={{ fontSize: 12 }}>
+        This hosted version has no server, so the tutor uses your own Anthropic API key (from console.anthropic.com). It is sent only to api.anthropic.com, directly from your browser, and usage is billed to your account. Use it on your own device only.
+      </div>
+      <input className="input" type="password" autoComplete="off" spellCheck={false} placeholder="sk-ant-…" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') save(); }} />
+      {draft && !valid && <div className="muted" style={{ fontSize: 12 }}>That doesn't look like an Anthropic API key (they start with sk-ant-).</div>}
+      <label style={{ cursor: 'pointer', display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}><input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> Remember on this device</label>
+      <button className="btn primary" disabled={!valid} onClick={save}>Use this key</button>
+    </div>
+  );
+}
+
 function renderRich(text: string) {
   // Minimal, safe formatting: **bold** and "#" headings, rendered as React nodes (no HTML injection)
   return text.split('\n').map((line, i) => {
@@ -58,6 +102,7 @@ export function TutorScreen() {
   const [status, setStatus] = useState<{ configured: boolean } | null>(STATIC_SITE ? { configured: false } : null);
   const [share, setShare] = useState(true);
   const [lesson, setLesson] = useState<string | null>(null);
+  const [browserKey, setBrowserKeyState] = useState<string | null>(() => getBrowserKey());
   const logRef = useRef<HTMLDivElement>(null);
   const report = useStore(app.report);
   void report;
@@ -70,13 +115,24 @@ export function TutorScreen() {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
   }, [msgs]);
 
+  const serverReady = Boolean(status?.configured);
+  const useBrowser = !serverReady && Boolean(browserKey);
+  const canChat = serverReady || useBrowser;
+
+  const appendText = (t: string) => setMsgs((m) => { const c = [...m]; c[c.length - 1] = { role: 'assistant', content: c[c.length - 1].content + t }; return c; });
+  const showError = (e: string) => setMsgs((m) => [...m.filter((x, i) => !(i === m.length - 1 && x.role === 'assistant' && !x.content)), { role: 'system', content: e }]);
+
   const send = async (text: string) => {
-    if (STATIC_SITE || !text.trim() || busy) return;
+    if (!canChat || !text.trim() || busy) return;
     const history = [...msgs.filter((m) => m.role !== 'system'), { role: 'user' as const, content: text.trim() }];
     setMsgs([...msgs, { role: 'user', content: text.trim() }, { role: 'assistant', content: '' }]);
     setInput('');
     setBusy(true);
     try {
+      if (useBrowser) {
+        await streamFromBrowser(browserKey!, history as ChatMessage[], share ? buildContext() : undefined, appendText, showError);
+        return;
+      }
       const res = await fetch('/api/tutor', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -99,8 +155,8 @@ export function TutorScreen() {
           const line = ev.replace(/^data: /, '');
           if (!line.trim()) continue;
           const data = JSON.parse(line) as { text?: string; error?: string; done?: boolean };
-          if (data.text) setMsgs((m) => { const c = [...m]; c[c.length - 1] = { role: 'assistant', content: c[c.length - 1].content + data.text }; return c; });
-          if (data.error) setMsgs((m) => [...m.filter((x, i) => !(i === m.length - 1 && x.role === 'assistant' && !x.content)), { role: 'system', content: data.error! }]);
+          if (data.text) appendText(data.text);
+          if (data.error) showError(data.error);
         }
       }
     } catch (e) {
@@ -118,11 +174,11 @@ export function TutorScreen() {
         <h1>AI tutor</h1>
         <p>Ask about theory, reading and technique, or ask for a practice plan. Your playing is always scored by the app's deterministic engine; the tutor only explains and plans.</p>
       </div>
-      {status && !status.configured && STATIC_SITE && (
-        <div className="banner">The live AI tutor needs the app's server, so it isn't available on this hosted static version. The built-in lessons below and the recommendations in each performance report still work. To chat with the tutor, run the app locally with <span className="mono">ANTHROPIC_API_KEY</span> set.</div>
-      )}
-      {status && !status.configured && !STATIC_SITE && (
-        <div className="banner">AI tutor setup: start the dev server with <span className="mono">ANTHROPIC_API_KEY</span> set (or sign in with <span className="mono">ant auth login</span>). Until then, the built-in lessons and the recommendations in each performance report still work.</div>
+      {status && !canChat && (
+        <div className="banner">
+          To chat with the tutor, enter your own Anthropic API key in the panel on the right
+          {!STATIC_SITE && <> (or start the dev server with <span className="mono">ANTHROPIC_API_KEY</span> set)</>}. Until then, the built-in lessons and the recommendations in each performance report still work.
+        </div>
       )}
       <div className="tutor">
         <section className="card chat">
@@ -130,7 +186,7 @@ export function TutorScreen() {
             {msgs.length === 0 && (
               <div className="grid" style={{ gap: 12, justifyItems: 'start' }}>
                 <div className="display" style={{ fontSize: 22 }}>What would you like to work on?</div>
-                <div className="chips">{QUICK.map((q) => <button key={q} className="chip" style={{ cursor: 'pointer' }} onClick={() => send(q)}>{q}</button>)}</div>
+                <div className="chips">{QUICK.map((q) => <button key={q} className="chip" style={{ cursor: 'pointer' }} disabled={!canChat} onClick={() => send(q)}>{q}</button>)}</div>
               </div>
             )}
             {msgs.map((m, i) => (
@@ -139,10 +195,11 @@ export function TutorScreen() {
           </div>
           <div className="chat-input">
             <textarea value={input} placeholder="Ask your tutor…" onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input); } }} />
-            <button className="btn primary lg" disabled={STATIC_SITE || busy || !input.trim()} onClick={() => send(input)}>{busy ? '…' : 'Send'}</button>
+            <button className="btn primary lg" disabled={!canChat || busy || !input.trim()} onClick={() => send(input)}>{busy ? '…' : 'Send'}</button>
           </div>
         </section>
         <aside className="grid" style={{ gap: 14, alignContent: 'start', overflow: 'auto' }}>
+          {status && !serverReady && <KeyPanel browserKey={browserKey} onChange={setBrowserKeyState} />}
           <div className="card card-pad grid" style={{ gap: 8 }}>
             <label style={{ cursor: 'pointer', display: 'flex', gap: 8, alignItems: 'flex-start', fontWeight: 600 }}><input type="checkbox" checked={share} onChange={(e) => setShare(e.target.checked)} /> Share my practice results with the tutor</label>
             <div className="muted" style={{ fontSize: 12 }}>This sends a text summary of your recent accuracy, missed notes and settings to the Anthropic API. Nothing else is shared.</div>

@@ -2,7 +2,7 @@
 
 A web app that listens to a physical MIDI keyboard, shows real sheet music on a grand staff, and coaches you note by note. **It never advances until you have played the right notes.**
 
-**Live demo:** https://roee030.github.io/piano-app/ (open it in desktop Chrome or Edge with a MIDI keyboard connected). The hosted version is a static site, so the live AI tutor chat is off there; everything else, including MIDI, works.
+**Live demo:** https://roee030.github.io/piano-app/ (open it in desktop Chrome or Edge with a MIDI keyboard connected). The hosted version is a static site with no server, so the AI tutor asks for your own Anthropic API key there. The key stays in your browser (only until you close the tab, unless you choose to remember it) and is sent only to api.anthropic.com.
 
 ## Quick start
 
@@ -15,7 +15,7 @@ npm run build        # type-check and production build
 
 - Use **desktop Chrome or Edge**. Web MIDI is not available in Safari.
 - To use the app from another device on the LAN: `npm run dev:https` (self-signed certificate).
-- **AI tutor (optional):** set `ANTHROPIC_API_KEY` before `npm run dev`. Without it, the tutor shows built-in offline lessons, and each performance report still gives recommendations, which are deterministic.
+- **AI tutor (optional):** set `ANTHROPIC_API_KEY` before `npm run dev`, or enter your own key on the AI tutor screen. Without it, the tutor shows built-in offline lessons, and each performance report still gives recommendations, which are deterministic.
 
 ## What's inside
 
@@ -42,7 +42,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the research, architecture,
 
 ## Deployment
 
-Every push to `main` runs the tests, builds the app and publishes it to GitHub Pages (`.github/workflows/pages.yml`).
+Every push to `main` runs the tests, builds the app and publishes it to GitHub Pages (`.github/workflows/pages.yml`). The Pages build sets `VITE_STATIC_SITE=1`, which switches the tutor to bring-your-own-key mode: the browser calls the Anthropic API directly (`src/tutor/claude.ts` holds the request shared with the local server endpoint).
 
 ## Status
 
