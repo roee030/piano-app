@@ -58,6 +58,25 @@ const isLoopback = (addr: string | undefined) =>
  * preflight for cross-site pages), from this machine unless
  * TUTOR_ALLOW_REMOTE=1, and within a simple rate limit.
  */
+function hostnameOf(hostHeader: string): string {
+  try { return new URL(`http://${hostHeader}`).hostname.toLowerCase(); } catch { return ''; }
+}
+
+/**
+ * localhost and loopback addresses always; with TUTOR_ALLOW_REMOTE=1 also IP
+ * literals (which DNS rebinding can't produce) and any names listed in
+ * TUTOR_ALLOWED_HOSTS (comma-separated).
+ */
+function allowedHost(hostHeader: string | undefined): boolean {
+  if (!hostHeader) return false;
+  const h = hostnameOf(hostHeader);
+  if (h === 'localhost' || h === '127.0.0.1' || h === '[::1]') return true;
+  if (process.env.TUTOR_ALLOW_REMOTE !== '1') return false;
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(h) || /^\[[0-9a-f:.]+\]$/.test(h)) return true;
+  const extra = (process.env.TUTOR_ALLOWED_HOSTS ?? '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+  return extra.includes(h);
+}
+
 const recent: number[] = [];
 const RATE_LIMIT = 20; // requests per minute
 
@@ -65,11 +84,15 @@ function checkRequest(req: IncomingMessage) {
   if (!isLoopback(req.socket.remoteAddress) && process.env.TUTOR_ALLOW_REMOTE !== '1') {
     throw new HttpError(403, 'The tutor only accepts requests from this computer. Set TUTOR_ALLOW_REMOTE=1 to allow other devices.');
   }
+  // Check hostnames against a fixed allowlist rather than comparing Origin to
+  // Host: a DNS-rebinding page (evil.example resolving to 127.0.0.1) sends
+  // matching Origin and Host headers.
+  if (!allowedHost(req.headers.host)) throw new HttpError(403, 'Host not allowed');
   const origin = req.headers.origin;
   if (origin) {
     let host: string;
     try { host = new URL(origin).host; } catch { throw new HttpError(403, 'Bad origin'); }
-    if (host !== req.headers.host) throw new HttpError(403, 'Cross-origin requests are not allowed');
+    if (host !== req.headers.host || !allowedHost(host)) throw new HttpError(403, 'Cross-origin requests are not allowed');
   }
   if (!String(req.headers['content-type'] ?? '').startsWith('application/json')) {
     throw new HttpError(415, 'Expected application/json');
