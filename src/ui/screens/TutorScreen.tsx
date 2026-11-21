@@ -82,7 +82,10 @@ export function TutorScreen() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ messages: history, context: share ? buildContext() : undefined }),
       });
-      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok || !res.body) {
+        const err = await res.json().catch(() => null) as { error?: string } | null;
+        throw new Error(err?.error ?? `HTTP ${res.status}`);
+      }
       const reader = res.body.getReader();
       const dec = new TextDecoder();
       let buf = '';

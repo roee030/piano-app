@@ -22,16 +22,62 @@ The app's features you can recommend: an exercise generator (left- and right-han
 
 Style: warm, encouraging and precise. Use scientific pitch names (C4 is middle C). Keep answers focused. Use short paragraphs or brief lists, and avoid long essays unless the student asks for depth. Never claim to have heard the student play. Base any statement about their playing only on the practice data provided.`;
 
+const MAX_BODY = 200_000;
+
+class HttpError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+  }
+}
+
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     let data = '';
+    let done = false;
     req.on('data', (c) => {
+      if (done) return;
       data += c;
-      if (data.length > 200_000) reject(new Error('Request too large'));
+      if (data.length > MAX_BODY) {
+        done = true;
+        req.removeAllListeners('data');
+        req.pause();
+        reject(new HttpError(413, 'Request too large'));
+      }
     });
-    req.on('end', () => resolve(data));
+    req.on('end', () => { if (!done) resolve(data); });
     req.on('error', reject);
   });
+}
+
+const isLoopback = (addr: string | undefined) =>
+  addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1';
+
+/**
+ * The endpoint spends the server's API credentials, so only accept requests
+ * that come from the app itself: same-origin JSON (which forces a CORS
+ * preflight for cross-site pages), from this machine unless
+ * TUTOR_ALLOW_REMOTE=1, and within a simple rate limit.
+ */
+const recent: number[] = [];
+const RATE_LIMIT = 20; // requests per minute
+
+function checkRequest(req: IncomingMessage) {
+  if (!isLoopback(req.socket.remoteAddress) && process.env.TUTOR_ALLOW_REMOTE !== '1') {
+    throw new HttpError(403, 'The tutor only accepts requests from this computer. Set TUTOR_ALLOW_REMOTE=1 to allow other devices.');
+  }
+  const origin = req.headers.origin;
+  if (origin) {
+    let host: string;
+    try { host = new URL(origin).host; } catch { throw new HttpError(403, 'Bad origin'); }
+    if (host !== req.headers.host) throw new HttpError(403, 'Cross-origin requests are not allowed');
+  }
+  if (!String(req.headers['content-type'] ?? '').startsWith('application/json')) {
+    throw new HttpError(415, 'Expected application/json');
+  }
+  const now = Date.now();
+  while (recent.length && now - recent[0] > 60_000) recent.shift();
+  if (recent.length >= RATE_LIMIT) throw new HttpError(429, 'Too many tutor requests; wait a minute.');
+  recent.push(now);
 }
 
 interface TutorRequest {
@@ -53,11 +99,15 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
   }
   let body: TutorRequest;
   try {
+    checkRequest(req);
     body = JSON.parse(await readBody(req));
     if (!Array.isArray(body.messages) || body.messages.length === 0) throw new Error('messages required');
   } catch (e) {
-    res.statusCode = 400;
-    res.end(JSON.stringify({ error: String(e) }));
+    res.statusCode = e instanceof HttpError ? e.status : 400;
+    res.setHeader('content-type', 'application/json');
+    if (res.statusCode === 413) res.setHeader('connection', 'close');
+    res.end(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }));
+    if (res.statusCode === 413) req.destroy();
     return;
   }
 
