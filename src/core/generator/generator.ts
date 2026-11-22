@@ -10,7 +10,8 @@ export const DEFAULT_CONFIG: GeneratorConfig = {
   hands: 'R',
   leftRange: { low: 48, high: 55 }, // C3..G3
   rightRange: { low: 60, high: 67 }, // C4..G4
-  measures: 4,
+  measures: 8,
+  measuresPerLine: 4,
   notesPerMeasure: 4,
   key: { fifths: 0, mode: 'major' },
   scale: 'diatonic',

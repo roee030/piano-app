@@ -340,3 +340,7 @@ input[type='checkbox'] { accent-color: var(--accent); width: 16px; height: 16px;
   .side { grid-template-columns: repeat(2, 1fr); }
   .two-col, .tutor { grid-template-columns: 1fr; }
 }
+
+.stepper { display: flex; gap: 6px; align-items: center; }
+.stepper .input { width: 72px; text-align: center; }
+.stepper .btn { min-width: 38px; justify-content: center; font-size: 16px; }

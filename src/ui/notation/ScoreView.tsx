@@ -57,8 +57,8 @@ export function ScoreView({ snap }: { snap: EngineSnapshot }) {
     if (!layout || curSystem < 0 || !scrollRef.current) return;
     const sys = layout.systems[curSystem];
     const box = scrollRef.current;
-    const top = (sys.top - 60) * SCALE;
-    const bottom = (sys.bottom + 60) * SCALE;
+    const top = (sys.top - 60) * layout.scale;
+    const bottom = (sys.bottom + 60) * layout.scale;
     if (top < box.scrollTop || bottom > box.scrollTop + box.clientHeight) box.scrollTo({ top: Math.max(0, top - 10), behavior: 'smooth' });
   }, [curSystem, layout]);
 
@@ -98,10 +98,10 @@ export function ScoreView({ snap }: { snap: EngineSnapshot }) {
     <div className="score-scroll" ref={scrollRef}>
       <div className="score-paper" ref={hostRef}>
         {error && <div className="score-error">Notation error: {error}</div>}
-        <div className="score-stack" style={{ height: layout ? layout.height * SCALE : 300 }}>
+        <div className="score-stack" style={{ height: layout ? layout.height * layout.scale : 300 }}>
           <div ref={engraveRef} className="score-engraving" aria-label="Sheet music" />
           {layout && (
-            <svg className="score-overlay" width={layout.width * SCALE} height={layout.height * SCALE} viewBox={`0 0 ${layout.width} ${layout.height}`} aria-hidden>
+            <svg className="score-overlay" width={layout.width * layout.scale} height={layout.height * layout.scale} viewBox={`0 0 ${layout.width} ${layout.height}`} aria-hidden>
               {overlay}
               {isRhythm && <line ref={cursorRef} className="rhythm-cursor" x1={0} x2={0} y1={0} y2={0} />}
             </svg>

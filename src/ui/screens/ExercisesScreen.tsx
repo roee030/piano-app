@@ -7,6 +7,9 @@ import { midiToName, MIDI_A0, MIDI_C8 } from '../../core/music/pitch';
 import { DURATION_LABELS, DurationCode, GeneratorConfig, NoteRange, Texture, HandSelection } from '../../core/model/types';
 import { Piano } from '../piano/Piano';
 
+/** Upper bound on lines in one generated exercise (keeps engraving fast). */
+const MAX_LINES = 32;
+
 const NOTE_OPTIONS = Array.from({ length: MIDI_C8 - MIDI_A0 + 1 }, (_, i) => MIDI_A0 + i);
 const TIMES = [
   { beats: 4, beatType: 4 },
@@ -53,6 +56,12 @@ export function ExercisesScreen() {
   const cfg = useStore(app.genConfig);
   const [draft, setDraft] = useState<GeneratorConfig>(cfg);
   const set = (p: Partial<GeneratorConfig>) => setDraft((d) => ({ ...d, ...p }));
+  const perLine = draft.measuresPerLine ?? 4;
+  const lines = Math.ceil(draft.measures / perLine);
+  const setLines = (n: number) => {
+    if (!Number.isFinite(n)) return;
+    set({ measures: Math.min(MAX_LINES, Math.max(1, Math.round(n))) * perLine });
+  };
   const [error, setError] = useState<string | null>(null);
 
   const go = (newSeed: boolean) => {
@@ -132,8 +141,20 @@ export function ExercisesScreen() {
               </div>
             </div>
             <div className="field">
-              <label>Measures: {draft.measures}</label>
-              <input type="range" min={1} max={16} value={draft.measures} onChange={(e) => set({ measures: Number(e.target.value) })} />
+              <label>Lines to practice: {lines} <span className="muted">({draft.measures} measures)</span></label>
+              <div className="stepper">
+                <button className="btn" disabled={lines <= 1} onClick={() => setLines(lines - 1)} aria-label="Fewer lines">−</button>
+                <input className="input mono" type="number" min={1} max={MAX_LINES} value={lines} onChange={(e) => setLines(Number(e.target.value))} aria-label="Lines" />
+                <button className="btn" disabled={lines >= MAX_LINES} onClick={() => setLines(lines + 1)} aria-label="More lines">+</button>
+              </div>
+            </div>
+            <div className="field">
+              <label>Measures per line</label>
+              <div className="seg">
+                {[1, 2, 3, 4].map((n) => (
+                  <button key={n} className={perLine === n ? 'active' : ''} onClick={() => set({ measuresPerLine: n, measures: lines * n })}>{n}</button>
+                ))}
+              </div>
             </div>
             <div className="field">
               <label>Notes per measure: {draft.notesPerMeasure}</label>

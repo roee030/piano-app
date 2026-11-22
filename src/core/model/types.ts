@@ -72,6 +72,8 @@ export interface GeneratorConfig {
   leftRange: NoteRange;
   rightRange: NoteRange;
   measures: number;
+  /** Most measures on one line of the score (the screen width may force fewer). Default 4. */
+  measuresPerLine?: number;
   notesPerMeasure: number;
   key: KeySpec;
   scale: ScaleType;

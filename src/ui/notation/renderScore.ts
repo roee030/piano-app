@@ -49,6 +49,8 @@ export interface SystemLayout {
 }
 
 export interface ScoreLayout {
+  /** Drawing scale actually used (may be below the requested one so the chosen measures per line fit). */
+  scale: number;
   width: number;
   height: number;
   notes: Map<string, NoteLayout>;
@@ -61,6 +63,7 @@ export interface ScoreLayout {
 
 const VEX_DUR: Record<string, string> = { w: 'w', hd: 'hd', h: 'h', qd: 'qd', q: 'q', '8': '8' };
 const SYSTEM_HEIGHT = 250;
+const MIN_SCALE = 0.72;
 const BASS_OFFSET = 105;
 const TOP_PAD = 10;
 
@@ -75,8 +78,6 @@ export function renderScore(
   opts: { width: number; dimHands: Hand[]; inkColor: string; dimColor: string; scale?: number },
 ): ScoreLayout {
   container.replaceChildren();
-  const scale = opts.scale ?? 1;
-  const width = Math.max(320, opts.width / scale);
   const accidentals = computeDisplayAccidentals(ex);
   const mTicks = measureTicks(ex.time);
   const keySig = vexKeySignature(ex.key);
@@ -86,29 +87,42 @@ export function renderScore(
   const minWidth = ex.measures.map((m) => {
     const counts = (['R', 'L'] as Hand[]).map((h) => m.voices[h]?.groups.length ?? 1);
     const accs = [...accidentals.keys()].filter((k) => k.startsWith(`m${m.index}-`)).length;
-    return 70 + Math.max(...counts) * 38 + accs * 8;
+    return 64 + Math.max(...counts) * 30 + accs * 8;
   });
   const margin = 14;
+  const perLine = Math.max(1, ex.config?.measuresPerLine ?? 4);
+
+  // Shrink the drawing (down to MIN_SCALE) so the chosen number of measures
+  // fits on each line; only if it still doesn't fit does a line wrap early.
+  let needed = 0;
+  for (let i = 0; i < ex.measures.length; i += perLine) {
+    const chunk = minWidth.slice(i, i + perLine).reduce((a, b) => a + b, 0);
+    needed = Math.max(needed, chunk + 45 + keyWidth + (i === 0 ? 30 : 0) + margin * 2);
+  }
+  const requested = opts.scale ?? 1;
+  const scale = Math.min(requested, Math.max(MIN_SCALE, opts.width / needed));
+  const width = Math.max(320, opts.width / scale);
   const usable = width - margin * 2;
+  // Lines hold `perLine` measures each; a group that is still too wide at the
+  // minimum scale is split, without shifting the groups after it.
   const lines: number[][] = [];
-  let cur: number[] = [];
-  let curW = 0;
-  ex.measures.forEach((_m, i) => {
-    const extra = cur.length === 0 ? 45 + keyWidth + (lines.length === 0 ? 30 : 0) : 0;
-    const w = minWidth[i] + extra;
-    if (cur.length > 0 && (curW + w > usable || cur.length >= 4)) {
-      lines.push(cur);
-      cur = [];
-      curW = 0;
-      const extra2 = 45 + keyWidth;
-      curW = minWidth[i] + extra2;
+  for (let start = 0; start < ex.measures.length; start += perLine) {
+    let cur: number[] = [];
+    let curW = 0;
+    for (let i = start; i < Math.min(start + perLine, ex.measures.length); i++) {
+      const w = minWidth[i] + (cur.length === 0 ? 45 + keyWidth + (lines.length === 0 ? 30 : 0) : 0);
+      if (cur.length > 0 && curW + w > usable) {
+        lines.push(cur);
+        cur = [];
+        curW = 45 + keyWidth + minWidth[i];
+        cur.push(i);
+        continue;
+      }
       cur.push(i);
-      return;
+      curW += w;
     }
-    cur.push(i);
-    curW += w;
-  });
-  if (cur.length) lines.push(cur);
+    if (cur.length) lines.push(cur);
+  }
 
   const height = TOP_PAD + lines.length * SYSTEM_HEIGHT + 10;
   const renderer = new Renderer(container, Renderer.Backends.SVG);
@@ -259,7 +273,7 @@ export function renderScore(
     return stave.getYForNote(line);
   };
 
-  return { width, height, notes, measures, systems, yForMidi, staffLineY };
+  return { scale, width, height, notes, measures, systems, yForMidi, staffLineY };
 }
 
 /** x position of a transport tick within a system (linear between anchors). */
