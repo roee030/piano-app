@@ -136,3 +136,38 @@ describe('Exercise generator', () => {
     for (const ex of PREDEFINED) expect(buildSteps(ex, ex.hands).length).toBeGreaterThan(0);
   });
 });
+
+describe('Extra accidentals', () => {
+  const pitches = (c: GeneratorConfig) => generateExercise(c).measures.flatMap((m) => (['R', 'L'] as const).flatMap((h) => m.voices[h]?.groups.flatMap((g) => g.pitches) ?? []));
+
+  it('adds only the requested type, in range, on black keys, and more for "many"', () => {
+    for (let seed = 1; seed <= 40; seed++) {
+      for (const texture of ['single', 'chords'] as const) {
+        const base = cfg({ seed, hands: 'both', texture, difficulty: 3 });
+        expect(pitches(base).every((p) => p.alter === 0)).toBe(true);
+        for (const type of ['sharps', 'flats', 'both'] as const) {
+          const few = pitches({ ...base, accidentals: 'few', accidentalType: type }).filter((p) => p.alter !== 0);
+          const many = pitches({ ...base, accidentals: 'many', accidentalType: type }).filter((p) => p.alter !== 0);
+          expect(few.length).toBeGreaterThan(0);
+          expect(many.length).toBeGreaterThan(few.length);
+          for (const p of many) {
+            if (type !== 'both') expect(p.alter).toBe(type === 'sharps' ? 1 : -1);
+            const midi = pitchToMidi(p);
+            expect([1, 3, 6, 8, 10]).toContain(midi % 12);
+            expect((midi >= 48 && midi <= 55) || (midi >= 60 && midi <= 67)).toBe(true);
+          }
+        }
+      }
+    }
+  });
+
+  it('is repeatable, keeps the melody, and prints the accidentals', () => {
+    const c = cfg({ seed: 9, accidentals: 'many' });
+    expect(generateExercise(c)).toEqual(generateExercise(c));
+    const strip = (x: GeneratorConfig) => pitches(x).map((p) => `${p.step}${p.octave}`);
+    expect(strip(c)).toEqual(strip({ ...c, accidentals: 'none' }));
+    const shown = [...computeDisplayAccidentals(generateExercise(c)).values()];
+    expect(shown.some((a) => a === '#' || a === 'b')).toBe(true);
+    expect(toMusicXML(generateExercise(c))).toMatch(/<alter>-?1<\/alter>/);
+  });
+});

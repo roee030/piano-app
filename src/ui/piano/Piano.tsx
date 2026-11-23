@@ -13,6 +13,8 @@ export interface PianoProps {
   satisfied?: Set<number>;
   /** Keys down right now (from real MIDI events) */
   held: number[];
+  /** Score spelling of the expected keys (Bb instead of A#) */
+  names?: Map<number, string>;
   wrong?: Set<number>;
   /** Faint preview of the next step */
   upcoming?: Set<number>;
@@ -24,7 +26,7 @@ export interface PianoProps {
 }
 
 /** Virtual piano. Its key states come only from MIDI events and the engine snapshot. */
-export function Piano({ low = MIDI_A0, high = MIDI_C8, expected, satisfied, held, wrong, upcoming, heat, labels, onRendered, compact }: PianoProps) {
+export function Piano({ low = MIDI_A0, high = MIDI_C8, expected, names, satisfied, held, wrong, upcoming, heat, labels, onRendered, compact }: PianoProps) {
   useLayoutEffect(() => {
     onRendered?.();
   });
@@ -63,7 +65,7 @@ export function Piano({ low = MIDI_A0, high = MIDI_C8, expected, satisfied, held
     }
     const h = heat?.[m];
     if (h !== undefined && h > 0) (style as Record<string, string>)['--heat'] = String(Math.min(1, h));
-    const name = midiToName(m);
+    const name = names?.get(m) ?? midiToName(m);
     const showLabel = !black && (labels === 'all' || (labels === 'c-only' && m % 12 === 0) || (!!exp && !compact));
     return (
       <div
@@ -75,7 +77,7 @@ export function Piano({ low = MIDI_A0, high = MIDI_C8, expected, satisfied, held
       >
         {exp && <span className="key-dot" />}
         {showLabel && <span className={`key-label ${exp ? 'strong' : ''}`}>{name}</span>}
-        {black && exp && !compact && <span className="key-label black-label">{midiToName(m, false)}</span>}
+        {black && exp && !compact && <span className="key-label black-label">{name}</span>}
       </div>
     );
   };

@@ -376,3 +376,16 @@ describe('[AC17] progress report reflects actual results', () => {
     expect(r.suggestions.find((x) => x.id === 'drill')?.drillMeasures).toEqual([0]);
   });
 });
+
+describe('Note names', () => {
+  it('feedback uses the spelling written in the score', () => {
+    const rig = new Rig(new PracticeEngine(buildExercise({ id: 'f', title: 'f', right: 'Bb4 F#4 C4 D4' }), { hands: 'R' }));
+    rig.down('G4');
+    expect(rig.snap.lastFeedback!.message).toContain('Expected Bb4');
+    rig.up('G4');
+    rig.tap('A#4'); // the same key as Bb4
+    expect(rig.snap.stepIndex).toBe(1);
+    rig.tap('A4');
+    expect(rig.snap.lastFeedback!.message).toContain('Expected F#4');
+  });
+});

@@ -1,6 +1,6 @@
 import type { Exercise, Hand, HandSelection } from '../model/types';
 import { DURATION_TICKS, measureTicks } from '../model/types';
-import { pitchToMidi } from '../music/pitch';
+import { midiToName, Pitch, pitchName, pitchToMidi } from '../music/pitch';
 
 /** A reference from an expected note back to the score (for highlighting). */
 export interface NoteRef {
@@ -12,6 +12,8 @@ export interface NoteRef {
 /** One physical key that must be pressed at a step. */
 export interface ExpectedNote {
   midi: number;
+  /** As spelled in the score (Bb or A#) */
+  pitch: Pitch;
   /** Hands that need this key here. Both hands appear on a shared unison. */
   hands: Hand[];
   refs: NoteRef[];
@@ -62,7 +64,7 @@ export function buildSteps(ex: Exercise, practice: HandSelection): Step[] {
             existing.refs.push({ groupId: g.id, pitchIndex, hand });
             existing.durationTicks = Math.max(existing.durationTicks, dur);
           } else {
-            slot!.notes.set(midi, { midi, hands: [hand], refs: [{ groupId: g.id, pitchIndex, hand }], durationTicks: dur });
+            slot!.notes.set(midi, { midi, pitch: p, hands: [hand], refs: [{ groupId: g.id, pitchIndex, hand }], durationTicks: dur });
           }
         });
       }
@@ -76,6 +78,15 @@ export function buildSteps(ex: Exercise, practice: HandSelection): Step[] {
       measure: slot.measure,
       notes: [...slot.notes.values()].sort((a, b) => a.midi - b.midi),
     }));
+}
+
+/** Name a key as the score spells it in the first of `steps` that contains it. */
+export function scoreNoteName(midi: number, steps: (Step | undefined | null)[], preferFlats = false): string {
+  for (const s of steps) {
+    const n = s?.notes.find((x) => x.midi === midi);
+    if (n) return pitchName(n.pitch);
+  }
+  return midiToName(midi, preferFlats);
 }
 
 export function firstStepOfMeasure(steps: Step[], measure: number): number {

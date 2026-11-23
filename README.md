@@ -9,7 +9,7 @@ A web app that listens to a physical MIDI keyboard, shows real sheet music on a 
 ```powershell
 npm install
 npm run dev          # http://localhost:5173 (localhost counts as a secure context for Web MIDI)
-npm test             # 61 automated tests with simulated MIDI
+npm test             # 64 automated tests with simulated MIDI
 npm run build        # type-check and production build
 ```
 

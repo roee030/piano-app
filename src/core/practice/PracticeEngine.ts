@@ -9,8 +9,8 @@
 import type { Exercise, Hand } from '../model/types';
 import { measureTicks } from '../model/types';
 import { beatTicks } from '../generator/generator';
-import { midiToName, pitchClass } from '../music/pitch';
-import { buildSteps, firstStepOfMeasure, lastStepOfMeasure, ExpectedNote, Step } from './timeline';
+import { pitchClass } from '../music/pitch';
+import { buildSteps, firstStepOfMeasure, lastStepOfMeasure, scoreNoteName, ExpectedNote, Step } from './timeline';
 import {
   DEFAULT_SETTINGS, EngineState, Feedback, LoopRange, Mistake, MistakeKind, NoteStatus, PauseReason,
   PracticeSettings, PracticeStats, StepResult, TransportInfo,
@@ -73,8 +73,6 @@ function emptyStats(): PracticeStats {
     loopsCompleted: 0,
   };
 }
-
-const names = (ms: number[]) => ms.map((m) => midiToName(m)).join(' ');
 
 export class PracticeEngine {
   private exercise: Exercise;
@@ -286,7 +284,7 @@ export class PracticeEngine {
           const missing = step.notes.filter((n) => !this.rt.pressed.has(n.midi)).map((n) => n.midi);
           this.rt.missedReported = true;
           this.recordMistake('missed', now, { expected: missing });
-          this.feedback('missed', now, missing, `Missed ${names(missing)}: too late`);
+          this.feedback('missed', now, missing, `Missed ${this.names(missing)}: too late`);
           if (this.settings.rhythmStopOnMiss) {
             this.freezeTransport(now);
           } else {
@@ -406,12 +404,21 @@ export class PracticeEngine {
     for (const m of missing) this.stats.missedByMidi[m] = (this.stats.missedByMidi[m] ?? 0) + 1;
     this.recordMistake('incompleteChord', t, { expected: missing });
     if (step.notes.length === 1) {
-      this.feedback('incompleteChord', t, missing, `Release the wrong key, then play ${names(missing)} again`);
+      this.feedback('incompleteChord', t, missing, `Release the wrong key, then play ${this.names(missing)} again`);
     } else {
       const hint = this.settings.mode === 'chord' ? 'press all the notes together' : 'hold the notes or press them together';
-      this.feedback('incompleteChord', t, missing, `Chord incomplete. Missing ${names(missing)}: ${hint}`);
+      this.feedback('incompleteChord', t, missing, `Chord incomplete. Missing ${this.names(missing)}: ${hint}`);
     }
     return true;
+  }
+
+  /** Note name as spelled in the score at the current or next step. */
+  private noteName(midi: number): string {
+    return scoreNoteName(midi, [this.steps[this.stepIndex], this.steps[this.stepIndex + 1]], this.exercise.key.fifths < 0);
+  }
+
+  private names(midis: number[]): string {
+    return midis.map((m) => this.noteName(m)).join(' ');
   }
 
   private evaluateNoteOn(midi: number, t: number) {
@@ -423,7 +430,7 @@ export class PracticeEngine {
       this.rt.pressed.set(midi, t);
       this.stats.correct++;
       if (this.settings.mode === 'rhythm') this.recordTiming(expected, step, t);
-      this.feedback('correct', t, [midi], `${midiToName(midi)} ✓`, midi);
+      this.feedback('correct', t, [midi], `${this.noteName(midi)} ✓`, midi);
       this.tryComplete(t);
       return;
     }
@@ -445,16 +452,16 @@ export class PracticeEngine {
     const partial = step.notes.length > 1 && step.notes.some((n) => this.isValid(n.midi, t));
     if (octaveMatch) {
       kind = 'wrongOctave';
-      message = `Wrong octave: expected ${midiToName(octaveMatch.midi)}, you played ${midiToName(midi)}`;
+      message = `Wrong octave: expected ${this.noteName(octaveMatch.midi)}, you played ${this.noteName(midi)}`;
     } else if (partial) {
       kind = 'extraNote';
-      message = `Extra note ${midiToName(midi)}. The chord is ${names(step.notes.map((n) => n.midi))}`;
+      message = `Extra note ${this.noteName(midi)}. The chord is ${this.names(step.notes.map((n) => n.midi))}`;
     } else if (next && next.notes.some((n) => n.midi === midi)) {
       kind = 'wrongSequence';
-      message = `${midiToName(midi)} comes next. Play ${names(pool.map((n) => n.midi))} first`;
+      message = `${this.noteName(midi)} comes next. Play ${this.names(pool.map((n) => n.midi))} first`;
     } else {
       kind = 'wrongNote';
-      message = `Expected ${names(pool.map((n) => n.midi))}, you played ${midiToName(midi)}`;
+      message = `Expected ${this.names(pool.map((n) => n.midi))}, you played ${this.noteName(midi)}`;
     }
     this.rt.wrongPlayed.push({ midi, kind });
     this.recordMistake(kind, t, { played: midi, expected: pool.map((n) => n.midi), hand });

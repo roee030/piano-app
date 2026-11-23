@@ -4,7 +4,7 @@ import { useStore } from '../hooks';
 import { PREDEFINED } from '../../core/generator/predefined';
 import { KEY_OPTIONS, keyName, SCALE_LABELS, ScaleType } from '../../core/music/keys';
 import { midiToName, MIDI_A0, MIDI_C8 } from '../../core/music/pitch';
-import { DURATION_LABELS, DurationCode, GeneratorConfig, NoteRange, Texture, HandSelection } from '../../core/model/types';
+import { DURATION_LABELS, DurationCode, AccidentalAmount, AccidentalType, GeneratorConfig, NoteRange, Texture, HandSelection } from '../../core/model/types';
 import { Piano } from '../piano/Piano';
 
 /** Upper bound on lines in one generated exercise (keeps engraving fast). */
@@ -56,6 +56,7 @@ export function ExercisesScreen() {
   const cfg = useStore(app.genConfig);
   const [draft, setDraft] = useState<GeneratorConfig>(cfg);
   const set = (p: Partial<GeneratorConfig>) => setDraft((d) => ({ ...d, ...p }));
+  const accidentals = draft.accidentals ?? 'none';
   const perLine = draft.measuresPerLine ?? 4;
   const lines = Math.ceil(draft.measures / perLine);
   const setLines = (n: number) => {
@@ -123,6 +124,23 @@ export function ExercisesScreen() {
               <select className="input" value={draft.scale} onChange={(e) => set({ scale: e.target.value as ScaleType })}>
                 {(Object.keys(SCALE_LABELS) as ScaleType[]).map((s) => <option key={s} value={s}>{SCALE_LABELS[s]}</option>)}
               </select>
+            </div>
+            <div className="field">
+              <label>Extra sharps and flats</label>
+              <div className="seg">
+                {(['none', 'few', 'many'] as AccidentalAmount[]).map((a) => (
+                  <button key={a} disabled={draft.scale === 'chromatic'} className={accidentals === a ? 'active' : ''} onClick={() => set({ accidentals: a })}>{a === 'none' ? 'None' : a === 'few' ? 'A few' : 'Many'}</button>
+                ))}
+              </div>
+              {draft.scale === 'chromatic' && <div className="muted" style={{ fontSize: 12 }}>The chromatic scale already includes them.</div>}
+            </div>
+            <div className="field">
+              <label>Accidental type</label>
+              <div className="seg">
+                {(['sharps', 'flats', 'both'] as AccidentalType[]).map((a) => (
+                  <button key={a} disabled={accidentals === 'none' || draft.scale === 'chromatic'} className={(draft.accidentalType ?? 'both') === a ? 'active' : ''} onClick={() => set({ accidentalType: a })}>{a === 'sharps' ? '♯ Sharps' : a === 'flats' ? '♭ Flats' : 'Both'}</button>
+                ))}
+              </div>
             </div>
             <div className="field">
               <label>Time signature</label>

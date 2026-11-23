@@ -6,7 +6,7 @@
 npm test
 ```
 
-The 61 tests in `tests/` drive the **real** `MidiInputProcessor` → `PracticeEngine` pipeline with raw MIDI bytes from a test-only simulated keyboard (`tests/helpers.ts`). The simulated keyboard is never imported by application code.
+The 64 tests in `tests/` drive the **real** `MidiInputProcessor` → `PracticeEngine` pipeline with raw MIDI bytes from a test-only simulated keyboard (`tests/helpers.ts`). The simulated keyboard is never imported by application code.
 
 | Acceptance criterion | Test(s) |
 |---|---|

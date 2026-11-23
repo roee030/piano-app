@@ -1,3 +1,5 @@
+import { pitchName } from '../../core/music/pitch';
+import { scoreNoteName } from '../../core/practice/timeline';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { app } from '../../app/controller';
 import { useStore, fmtPct } from '../hooks';
@@ -27,6 +29,8 @@ export function PracticeScreen() {
   const [showSettings, setShowSettings] = useState(false);
   const { settings, state, stats, steps, stepIndex, exercise } = snap;
   const step = snap.currentStep;
+  // Names follow the score's spelling (Bb, not A#); a key just played may belong to the previous step
+  const nameOf = (m: number) => scoreNoteName(m, [step, snap.steps[snap.stepIndex - 1], snap.nextStep], exercise.key.fifths < 0);
   const now = () => performance.now();
 
   // ---- metronome follows the transport
@@ -77,14 +81,16 @@ export function PracticeScreen() {
   const pianoProps = useMemo(() => {
     const expected = new Map<number, Hand[]>();
     const satisfied = new Set<number>();
+    const names = new Map<number, string>();
     if (step && state !== 'completed') {
       for (const n of step.notes) {
         expected.set(n.midi, n.hands);
+        names.set(n.midi, pitchName(n.pitch));
         if (snap.noteStatus[n.midi] === 'correct') satisfied.add(n.midi);
       }
     }
     const upcoming = new Set<number>(snap.nextStep?.notes.map((n) => n.midi) ?? []);
-    return { expected, satisfied, wrong: new Set(snap.wrongHeld), upcoming };
+    return { expected, names, satisfied, wrong: new Set(snap.wrongHeld), upcoming };
   }, [step, snap.noteStatus, snap.wrongHeld, snap.nextStep, state]);
 
   const [lo, hi] = useMemo(() => {
@@ -162,11 +168,11 @@ export function PracticeScreen() {
             <div className="fb-pair" key={fb?.time ?? 0}>
               <div className="fb-box">
                 <div className="fb-k">Expected</div>
-                <div className="fb-v">{step && state !== 'completed' ? step.notes.map((n) => midiToName(n.midi, exercise.key.fifths < 0)).join(' ') : '—'}</div>
+                <div className="fb-v">{step && state !== 'completed' ? step.notes.map((n) => nameOf(n.midi)).join(' ') : '—'}</div>
               </div>
               <div className={`fb-box ${fb?.kind === 'correct' ? 'ok' : lastWrong ? 'bad' : ''} fb-flash`}>
                 <div className="fb-k">Played</div>
-                <div className="fb-v">{snap.heldKeys.length ? snap.heldKeys.map((m) => midiToName(m, exercise.key.fifths < 0)).join(' ') : lastWrong ? midiToName(lastWrong.played!) : fb?.played !== undefined ? midiToName(fb.played) : '—'}</div>
+                <div className="fb-v">{snap.heldKeys.length ? snap.heldKeys.map(nameOf).join(' ') : lastWrong ? nameOf(lastWrong.played!) : fb?.played !== undefined ? nameOf(fb.played) : '—'}</div>
               </div>
             </div>
             <div className="fb-msg">{fb ? fb.message : MODE_INFO[settings.mode]}</div>
@@ -174,10 +180,10 @@ export function PracticeScreen() {
               <div className="chips" style={{ marginTop: 10 }}>
                 {step.notes.map((n) => (
                   <span key={n.midi} className="chip" style={{ color: snap.noteStatus[n.midi] === 'correct' ? 'var(--correct)' : undefined }}>
-                    {snap.noteStatus[n.midi] === 'correct' ? '✓' : '○'} {midiToName(n.midi)}
+                    {snap.noteStatus[n.midi] === 'correct' ? '✓' : '○'} {nameOf(n.midi)}
                   </span>
                 ))}
-                {snap.wrongHeld.map((m) => <span key={m} className="chip bad">✕ {midiToName(m)}</span>)}
+                {snap.wrongHeld.map((m) => <span key={m} className="chip bad">✕ {nameOf(m)}</span>)}
               </div>
             )}
           </div>

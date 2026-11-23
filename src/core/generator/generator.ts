@@ -3,7 +3,7 @@ import type {
   DurationCode, Exercise, GeneratorConfig, Hand, Measure, NoteGroup, TimeSignature, Voice,
 } from '../model/types';
 import { DURATION_TICKS, measureTicks } from '../model/types';
-import { Pitch, pitchToMidi } from '../music/pitch';
+import { isBlackKey, Pitch, pitchToMidi } from '../music/pitch';
 import { keyName, keyTonic, scalePitches } from '../music/keys';
 
 export const DEFAULT_CONFIG: GeneratorConfig = {
@@ -171,11 +171,48 @@ function generateVoice(rng: Rng, hand: Hand, cfg: GeneratorConfig): Voice[] {
   return voices;
 }
 
+const ACCIDENTAL_SHARE = { none: 0, few: 0.1, many: 0.3 } as const;
+
+/**
+ * Raise or lower some natural notes to the neighboring black key (so never E#,
+ * B#, Cb or Fb), inside the hand's range. The first and last notes stay in the
+ * key. The chromatic scale already has accidentals and is left alone.
+ */
+function addAccidentals(rng: Rng, voices: Voice[], hand: Hand, cfg: GeneratorConfig) {
+  const share = ACCIDENTAL_SHARE[cfg.accidentals ?? 'none'];
+  if (!share || cfg.scale === 'chromatic') return;
+  const range = hand === 'L' ? cfg.leftRange : cfg.rightRange;
+  const low = Math.min(range.low, range.high);
+  const high = Math.max(range.low, range.high);
+  const type = cfg.accidentalType ?? 'both';
+  const alters = type === 'sharps' ? [1] : type === 'flats' ? [-1] : [1, -1];
+
+  const sounding = voices.flatMap((v) => v.groups).filter((g) => g.pitches.length > 0);
+  const options = sounding.slice(1, -1).map((group) => ({
+    group,
+    choices: group.pitches.flatMap((p, i) => (p.alter !== 0 ? [] : alters.map((alter) => ({ i, pitch: { ...p, alter } })))).filter(({ i, pitch }) => {
+      const midi = pitchToMidi(pitch);
+      return isBlackKey(midi) && midi >= low && midi <= high
+        && group.pitches.every((q, j) => j === i || pitchToMidi(q) !== midi);
+    }),
+  })).filter((o) => o.choices.length > 0);
+
+  let remaining = Math.min(options.length, Math.max(1, Math.round(sounding.length * share)));
+  while (remaining-- > 0) {
+    const [{ group, choices }] = options.splice(rng.int(0, options.length - 1), 1);
+    const c = rng.pick(choices);
+    group.pitches = group.pitches.map((p, i) => (i === c.i ? c.pitch : p)).sort((a, b) => pitchToMidi(a) - pitchToMidi(b));
+  }
+}
+
 export function generateExercise(cfg: GeneratorConfig): Exercise {
   const rng = new Rng(cfg.seed);
   const hands: Hand[] = cfg.hands === 'both' ? ['R', 'L'] : [cfg.hands];
   const perHand: Partial<Record<Hand, Voice[]>> = {};
   for (const h of hands) perHand[h] = generateVoice(rng, h, cfg);
+  // A separate random stream, so turning accidentals on keeps the same melody
+  const accRng = new Rng(cfg.seed ^ 0x5bd1e995);
+  for (const h of hands) addAccidentals(accRng, perHand[h]!, h, cfg);
   const measures: Measure[] = [];
   for (let mi = 0; mi < cfg.measures; mi++) {
     const voices: Measure['voices'] = {};

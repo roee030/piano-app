@@ -67,6 +67,9 @@ export interface NoteRange {
 
 export type Texture = 'single' | 'mixed' | 'chords';
 
+export type AccidentalAmount = 'none' | 'few' | 'many';
+export type AccidentalType = 'sharps' | 'flats' | 'both';
+
 export interface GeneratorConfig {
   hands: HandSelection;
   leftRange: NoteRange;
@@ -78,6 +81,10 @@ export interface GeneratorConfig {
   key: KeySpec;
   scale: ScaleType;
   time: TimeSignature;
+  /** How many notes get an accidental outside the scale. Default 'none'. */
+  accidentals?: AccidentalAmount;
+  /** Which accidentals to add. Default 'both'. */
+  accidentalType?: AccidentalType;
   durations: DurationCode[];
   texture: Texture;
   difficulty: 1 | 2 | 3 | 4 | 5;
